@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Boneco com Olhos que Seguem o Mouse</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            user-select: none; /* Evita seleção acidental ao interagir */
+        }
+
+        body {
+            min-height: 100vh;
+            background: linear-gradient(135deg, #1a2a3a 0%, #0f1a24 100%);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-family: 'Segoe UI', 'Poppins', system-ui, -apple-system, 'Roboto', sans-serif;
+            cursor: crosshair;
+            padding: 20px;
+        }
+
+        /* Container principal que centraliza o boneco e dá um efeito de cartão */
+        .card {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(2px);
+            border-radius: 3rem;
+            padding: 2rem 2rem 2.5rem 2rem;
+            box-shadow: 0 25px 45px rgba(0, 0, 0, 0.3), inset 0 1px 2px rgba(255, 255, 255, 0.2);
+            transition: transform 0.2s ease;
+        }
+
+        /* Área do boneco */
+        .boneco-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+        }
+
+        canvas {
+            display: block;
+            margin: 0 auto;
+            background: #fef9e8;
+            border-radius: 48px;
+            box-shadow: 0 20px 35px rgba(0, 0, 0, 0.4), inset 0 1px 4px rgba(255, 255, 255, 0.8);
+            cursor: pointer;
+            transition: all 0.2s;
+            width: 100%;
+            height: auto;
+        }
+
+        /* Área de texto interativo */
+        .info {
+            text-align: center;
+            margin-top: 1.8rem;
+            color: #f0ede8;
+            font-weight: 500;
+            letter-spacing: 0.5px;
+        }
+
+        .info p {
+            background: rgba(0, 0, 0, 0.5);
+            display: inline-block;
+            padding: 0.5rem 1.2rem;
+            border-radius: 60px;
+            backdrop-filter: blur(4px);
+            font-size: 1rem;
+            font-weight: 400;
+            gap: 10px;
+        }
+
+        .info span {
+            display: inline-block;
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 0.6; transform: scale(1);}
+            100% { opacity: 1; transform: scale(1.05);}
+        }
+
+        /* rodapé estilizado */
+        footer {
+            position: fixed;
+            bottom: 12px;
+            left: 0;
+            right: 0;
+            text-align: center;
+            font-size: 0.75rem;
+            color: #aaa;
+            background: rgba(0,0,0,0.4);
+            padding: 4px;
+            border-radius: 20px;
+            width: fit-content;
+            margin: 0 auto;
+            backdrop-filter: blur(3px);
+            pointer-events: none;
+        }
+
+        /* Responsividade: canvas se ajusta sem perder qualidade */
+        @media (max-width: 550px) {
+            .card {
+                padding: 1rem 1rem 1.5rem;
+            }
+            .info p {
+                font-size: 0.85rem;
+                padding: 0.3rem 1rem;
+            }
+        }
+
+        /* efeito hover no card */
+        .card:hover {
+            transform: scale(1.01);
+        }
+    </style>
+</head>
+<body>
+<div>
+    <div class="card">
+        <div class="boneco-container">
+            <canvas id="bonecoCanvas" width="500" height="500" style="width:100%; max-width:500px; height:auto; aspect-ratio:1/1">
+                Seu navegador não suporta canvas, mas o boneco é legal! :D
+            </canvas>
+        </div>
+        <div class="info">
+            <p>👀 <span>👆 mova o mouse!</span> 👀</p>
+            <p style="font-size:0.8rem; margin-top:6px;">✨ olhos seguem seu cursor ✨</p>
+        </div>
+    </div>
+    <footer>
+        🧸 boneco interativo | olhos mágicos seguem o mouse
+    </footer>
+</div>
+
+<script>
+    (function(){
+        // -------- CONFIGURAÇÕES DO BONECO E OLHOS ----------
+        const canvas = document.getElementById('bonecoCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        // Dimensões reais do canvas (definimos width/height como 500x500 fixos via atributo)
+        // mas garantimos via código que as coordenadas sejam sempre proporcionais
+        const canvasWidth = 500;
+        const canvasHeight = 500;
+        canvas.width = canvasWidth;
+        canvas.height = canvasHeight;
+        
+        // Posição inicial do mouse (centralizada no canvas, olhos olhando para frente)
+        let mouseX = canvasWidth / 2;
+        let mouseY = canvasHeight / 2.5; // ponto de partida agradável
+        
+        // Limites para os olhos (movimento máximo da pupila dentro do branco do olho)
+        // Raio dos olhos, raio da pupila e posições base dos olhos no rosto
+        const leftEyeBaseX = 180;   // centro esquerdo do olho (base)
+        const rightEyeBaseX = 320;  // centro direito do olho
+        const eyeBaseY = 210;       // altura dos olhos (no rosto)
+        const eyeRadius = 32;       // raio do globo ocular (parte branca)
+        const pupilRadius = 14;     // raio da pupila/íris preta
+        
+        // Fator de suavidade para evitar movimentos bruscos (efeito "follow" suave)
+        let smoothMouseX = mouseX;
+        let smoothMouseY = mouseY;
+        const SMOOTH_FACTOR = 0.12; // mais baixo = mais suave, porém responde bem
+        
+        // Variáveis para animação contínua (requestAnimationFrame)
+        let animationId = null;
+        
+        // Função que desenha TODO o boneco com expressão e olhos que seguem o mouse suave
+        function desenharBoneco(targetX, targetY) {
+            if (!ctx) return;
+            
+            // Limpa o canvas com cor de fundo quente (tom pastel)
+            ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+            
+            // ----- 1. Fundo arredondado interno para destacar o personagem (opcional, estilo) -----
+            ctx.save();
+            
+            // ----- 2. Desenhar corpo (macio e amigável) -----
+            // Corpo estilo ursinho/boneco redondo
+            ctx.beginPath();
+            ctx.ellipse(250, 380, 120, 140, 0, 0, Math.PI * 2);
+            ctx.fillStyle = "#D9B48B";  // tom de madeira/bege fofinho
+            ctx.fill();
+            ctx.strokeStyle = "#AA7C5C";
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            
+            // detalhe da barriga (cor mais clara)
+            ctx.beginPath();
+            ctx.ellipse(250, 400, 70, 85, 0, 0, Math.PI * 2);
+            ctx.fillStyle = "#F5DEB3";
+            ctx.fill();
+            ctx.strokeStyle = "#C69C6D";
+            ctx.stroke();
+            
+            // ----- 3. Cabeça redonda e simpática -----
+            ctx.beginPath();
+            ctx.arc(250, 210, 125, 0, Math.PI * 2);
+            ctx.fillStyle = "#F4C2A2"; // tom pêssego
+            ctx.fill();
+            ctx.strokeStyle = "#B97F55";
+            ctx.lineWidth = 2.5;
+            ctx.stroke();
+            
+            // ----- 4. Orelhas fofas (simétricas) -----
+            ctx.beginPath();
+            ctx.ellipse(155, 110, 42, 52, -0.3, 0, Math.PI * 2);
+            ctx.fillStyle = "#E6AA7A";
+            ctx.fill();
+            ctx.strokeStyle = "#B97F55";
+            ctx.stroke();
+            
+            ctx.beginPath();
+            ctx.ellipse(345, 110, 42, 52, 0.3, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+            
+            // detalhe interno orelhas
+            ctx.beginPath();
+            ctx.ellipse(160, 114, 22, 32, -0.2, 0, Math.PI * 2);
+            ctx.fillStyle = "#F1C6A3";
+            ctx.fill();
+            ctx.beginPath();
+            ctx.ellipse(340, 114, 22, 32, 0.2, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // ----- 5. Olhos (branco dos olhos) -----
+            // Esclerótica (parte branca) para os dois olhos
+            ctx.shadowBlur = 0; // reset shadow
+            ctx.beginPath();
+            ctx.arc(leftEyeBaseX, eyeBaseY, eyeRadius, 0, Math.PI * 2);
+            ctx.fillStyle = "#FFFFFF";
+            ctx.fill();
+            ctx.strokeStyle = "#8B5A2B";
+            ctx.lineWidth = 1.8;
+            ctx.stroke();
+            
+            ctx.beginPath();
+            ctx.arc(rightEyeBaseX, eyeBaseY, eyeRadius, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+            
+            // detalhe de brilho no branco do olho (pequenos reflexos)
+            ctx.beginPath();
+            ctx.arc(leftEyeBaseX - 8, eyeBaseY - 7, 4, 0, Math.PI * 2);
+            ctx.fillStyle = "#F8F8FC";
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(rightEyeBaseX - 8, eyeBaseY - 7, 4, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // --------- CÁLCULO DAS PUPILAS (seguem o mouse suavizado) ----------
+            // Calcula o vetor do centro do olho até a posição alvo (mouse suave)
+            // Para cada olho, limitamos o deslocamento máximo ao raio do olho - raio da pupila - margem
+            const maxOffset = eyeRadius - pupilRadius - 2;  // máximo deslocamento = ~16px (32-14-2)
+            
+            // Função auxiliar para calcular posição da pupila para um olho
+            function getPupilPosition(eyeCenterX, eyeCenterY, targetPointX, targetPointY) {
+                // Vetor do centro do olho até a posição do cursor suavizado
+                let dx = targetPointX - eyeCenterX;
+                let dy = targetPointY - eyeCenterY;
+                const distance = Math.hypot(dx, dy);
+                if (distance < 0.01) return { x: eyeCenterX, y: eyeCenterY };
+                // Se a distância for menor que o deslocamento máximo, a pupila fica exatamente na direção do cursor
+                let offset = Math.min(distance, maxOffset);
+                const ratio = offset / distance;
+                const pupilaX = eyeCenterX + dx * ratio;
+                const pupilaY = eyeCenterY + dy * ratio;
+                return { x: pupilaX, y: pupilaY };
+            }
+            
+            // Usa o mouse suavizado (smoothMouseX, smoothMouseY) para movimento fluido
+            const leftPupil = getPupilPosition(leftEyeBaseX, eyeBaseY, smoothMouseX, smoothMouseY);
+            const rightPupil = getPupilPosition(rightEyeBaseX, eyeBaseY, smoothMouseX, smoothMouseY);
+            
+            // Desenha as pupilas (pretas com brilho)
+            ctx.beginPath();
+            ctx.arc(leftPupil.x, leftPupil.y, pupilRadius, 0, Math.PI * 2);
+            ctx.fillStyle = "#1E2A2E";
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(rightPupil.x, rightPupil.y, pupilRadius, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Brilho nas pupilas (pontinhos de luz)
+            ctx.beginPath();
+            ctx.arc(leftPupil.x - 3, leftPupil.y - 3, 3, 0, Math.PI * 2);
+            ctx.fillStyle = "#FFFFFF";
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(rightPupil.x - 3, rightPupil.y - 3, 3, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Segundo brilho menor
+            ctx.beginPath();
+            ctx.arc(leftPupil.x - 1, leftPupil.y - 5, 1.2, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(rightPupil.x - 1, rightPupil.y - 5, 1.2, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // ----- 6. Nariz triangular simpático -----
+            ctx.beginPath();
+            ctx.moveTo(245, 258);
+            ctx.lineTo(255, 258);
+            ctx.lineTo(250, 272);
+            ctx.fillStyle = "#E6875E";
+            ctx.fill();
+            ctx.strokeStyle = "#B95C3A";
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+            
+            // pequeno brilho no nariz
+            ctx.beginPath();
+            ctx.arc(250, 263, 2, 0, Math.PI * 2);
+            ctx.fillStyle = "#FFDAB9";
+            ctx.fill();
+            
+            // ----- 7. Boca simpática (sorriso) -----
+            ctx.beginPath();
+            ctx.arc(250, 285, 32, 0.05, Math.PI - 0.05);
+            ctx.strokeStyle = "#A55D35";
+            ctx.lineWidth = 3;
+            ctx.stroke();
+            // bochechas rosadas
+            ctx.beginPath();
+            ctx.ellipse(198, 263, 12, 8, 0, 0, Math.PI * 2);
+            ctx.fillStyle = "#FFB6C1";
+            ctx.fill();
+            ctx.beginPath();
+            ctx.ellipse(302, 263, 12, 8, 0, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // ----- 8. Sobrancelhas expressivas (acompanham levemente a direção do olhar? algo simpático) -----
+            // movimento sutil das sobrancelhas baseado na posição Y do mouse (surpresinha)
+            const browOffset = Math.min(Math.max((smoothMouseY - eyeBaseY) / 70, -4), 5);
+            // esquerda
+            ctx.beginPath();
+            ctx.moveTo(138, 175 - browOffset * 0.5);
+            ctx.quadraticCurveTo(160, 165 - browOffset, 182, 172 - browOffset * 0.7);
+            ctx.lineWidth = 4;
+            ctx.strokeStyle = "#6F4A2E";
+            ctx.stroke();
+            // direita
+            ctx.beginPath();
+            ctx.moveTo(318, 175 - browOffset * 0.5);
+            ctx.quadraticCurveTo(340, 165 - browOffset, 362, 172 - browOffset * 0.7);
+            ctx.stroke();
+            
+            // cilios opcional (alegria)
+            ctx.beginPath();
+            ctx.moveTo(140, 200);
+            ctx.lineTo(132, 195);
+            ctx.lineTo(144, 193);
+            ctx.fillStyle = "#5D3A1F";
+            ctx.fill();
+            ctx.beginPath();
+            ctx.moveTo(360, 200);
+            ctx.lineTo(368, 195);
+            ctx.lineTo(356, 193);
+            ctx.fill();
+            
+            // ----- 9. Chapéu ou topete? Um pequeno topetinho charmoso -----
+            ctx.beginPath();
+            ctx.moveTo(200, 92);
+            ctx.quadraticCurveTo(250, 55, 300, 92);
+            ctx.fillStyle = "#C19A6B";
+            ctx.fill();
+            ctx.beginPath();
+            ctx.moveTo(210, 90);
+            ctx.quadraticCurveTo(250, 68, 290, 90);
+            ctx.fillStyle = "#E6BC8E";
+            ctx.fill();
+            
+            // botões ou detalhes no corpo
+            ctx.beginPath();
+            ctx.arc(250, 430, 12, 0, Math.PI * 2);
+            ctx.fillStyle = "#C57848";
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(250, 465, 9, 0, Math.PI * 2);
+            ctx.fillStyle = "#B56336";
+            ctx.fill();
+            
+            // mãozinhas (linhas simples)
+            ctx.beginPath();
+            ctx.moveTo(140, 350);
+            ctx.lineTo(105, 375);
+            ctx.lineTo(125, 392);
+            ctx.fillStyle = "#D9B48B";
+            ctx.fill();
+            ctx.beginPath();
+            ctx.moveTo(360, 350);
+            ctx.lineTo(395, 375);
+            ctx.lineTo(375, 392);
+            ctx.fill();
+            
+            // pé/zapatos
+            ctx.beginPath();
+            ctx.ellipse(200, 495, 28, 18, -0.2, 0, Math.PI * 2);
+            ctx.fillStyle = "#A46B3E";
+            ctx.fill();
+            ctx.beginPath();
+            ctx.ellipse(300, 495, 28, 18, 0.2, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.restore();
+            
+            // legenda sutil dentro do canvas (efeito interativo)
+            ctx.font = "500 12px 'Segoe UI', system-ui";
+            ctx.fillStyle = "#896A45";
+            ctx.shadowBlur = 0;
+            ctx.fillText("✨ olhos mágicos ✨", 195, 475);
+        }
+        
+        // ----- Atualização suave do mouse (interpolação para movimento fluido) -----
+        function atualizarPosicaoMouseSuave() {
+            // Aplica interpolação linear entre o mouse real e o atual suavizado
+            smoothMouseX = smoothMouseX + (mouseX - smoothMouseX) * SMOOTH_FACTOR;
+            smoothMouseY = smoothMouseY + (mouseY - smoothMouseY) * SMOOTH_FACTOR;
+            
+            // Limita as coordenadas suavizadas para não extrapolar muito além do canvas
+            // (mas os olhos já tem limites próprios; essa é só pra manter estabilidade)
+            smoothMouseX = Math.min(Math.max(smoothMouseX, 20), canvasWidth - 20);
+            smoothMouseY = Math.min(Math.max(smoothMouseY, 20), canvasHeight - 20);
+        }
+        
+        // ----- Função de animação principal (loop) -----
+        function animar() {
+            atualizarPosicaoMouseSuave();
+            desenharBoneco(smoothMouseX, smoothMouseY);
+            animationId = requestAnimationFrame(animar);
+        }
+        
+        // ----- CAPTURA DO MOVIMENTO DO MOUSE (no canvas e também no documento para quando sair?)-----
+        // Queremos que os olhos sigam o mouse mesmo quando o cursor está fora do canvas? 
+        // Será mais divertido: acompanhar o mouse em toda a página, pois o canvas está centralizado.
+        // Porém, coordenadas relativas ao canvas: precisamos converter as coordenadas da página para coordenadas do canvas.
+        function getMouseCoordsRelativeToCanvas(event) {
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;   // canvas interno 500 / largura exibida
+            const scaleY = canvas.height / rect.height;
+            let clientX, clientY;
+            
+            if (event.touches) {
+                // suporte a toque mobile (olhos seguem o toque também)
+                clientX = event.touches[0].clientX;
+                clientY = event.touches[0].clientY;
+            } else {
+                clientX = event.clientX;
+                clientY = event.clientY;
+            }
+            
+            let canvasX = (clientX - rect.left) * scaleX;
+            let canvasY = (clientY - rect.top) * scaleY;
+            
+            // Clamp para ficar dentro dos limites do canvas
+            canvasX = Math.min(Math.max(canvasX, 0), canvasWidth);
+            canvasY = Math.min(Math.max(canvasY, 0), canvasHeight);
+            
+            return { x: canvasX, y: canvasY };
+        }
+        
+        // Manipulador de movimento do mouse (em qualquer lugar da página, mas sempre convertendo)
+        function onGlobalMouseMove(event) {
+            const { x, y } = getMouseCoordsRelativeToCanvas(event);
+            // Atualiza a variável raw (target) que será suavizada
+            mouseX = x;
+            mouseY = y;
+        }
+        
+        // Para dispositivos touch (mobile), segue o dedo
+        function onTouchMove(event) {
+            event.preventDefault();
+            if (event.touches.length) {
+                const { x, y } = getMouseCoordsRelativeToCanvas(event);
+                mouseX = x;
+                mouseY = y;
+            }
+        }
+        
+        // Também quando o mouse sair da janela, não deixar os olhos "fugirem" bruscamente
+        // Vamos manter a última posição conhecida, mas também resetar suave? Melhor manter posição.
+        // Opcional: se sair da página, não causa problema.
+        
+        // evento de reset caso mouse saia do canvas ou do documento (opcional, mas manter é bom)
+        function onMouseLeaveDocument(event) {
+            // Quando o mouse sai completamente da janela, não queremos que os olhos se percam
+            // mantemos o último valor, não há necessidade de mudar.
+            // Só para garantir que não haja erro.
+        }
+        
+        // Adicionar eventos para mouse e toque
+        window.addEventListener('mousemove', onGlobalMouseMove);
+        canvas.addEventListener('touchmove', onTouchMove, { passive: false });
+        canvas.addEventListener('touchstart', onTouchMove, { passive: false });
+        document.addEventListener('mouseleave', onMouseLeaveDocument);
+        
+        // Para garantir que os olhos comecem numa posição centralizada e agradável, 
+        // definimos o mouse inicial no centro do rosto (entre os olhos)
+        const initialFaceX = (leftEyeBaseX + rightEyeBaseX) / 2; // 250
+        const initialFaceY = eyeBaseY; // 210
+        mouseX = initialFaceX;
+        mouseY = initialFaceY;
+        smoothMouseX = mouseX;
+        smoothMouseY = mouseY;
+        
+        // Inicia animação
+        animar();
+        
+        // Redimensionamento: recalcular escala se necessário? O canvas já tem tamanho fixo em memória (500x500)
+        // Apenas garantir que quando redimensionar a janela, as coordenadas relativas funcionem bem
+        // O getBoundingClientRect sempre vai dar valores atuais, perfeito.
+        
+        // Opcional: limpeza de animação caso a página seja descarregada, mas é desnecessário.
+        console.log('Boneco carregado! 👀 Os olhos seguem seu cursor (ou toque) suavemente.');
+    })();
+</script>
+</body>
+</html>
